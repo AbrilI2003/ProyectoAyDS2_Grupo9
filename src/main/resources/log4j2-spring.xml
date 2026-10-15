@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration status="WARN" monitorInterval="30">
+
+	<Properties>
+		<Property name="LOG_DIR">logs</Property>
+		<Property name="APP_NAME">demo</Property>
+		<Property name="LOG_PATTERN">%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%t] %logger{36} - %msg%n</Property>
+	</Properties>
+
+	<Appenders>
+		<Console name="Console" target="SYSTEM_OUT">
+			<PatternLayout pattern="%highlight{%d{HH:mm:ss.SSS} %-5level [%t] %logger{36} - %msg%n}{FATAL=red blink, ERROR=red, WARN=yellow, INFO=green, DEBUG=cyan, TRACE=white}"/>
+		</Console>
+
+		<RollingFile name="File"
+					 fileName="${LOG_DIR}/${APP_NAME}.log"
+					 filePattern="${LOG_DIR}/${APP_NAME}-%d{yyyy-MM-dd}-%i.log.gz">
+			<PatternLayout pattern="${LOG_PATTERN}"/>
+			<Policies>
+				<TimeBasedTriggeringPolicy/>
+				<SizeBasedTriggeringPolicy size="10MB"/>
+			</Policies>
+			<DefaultRolloverStrategy max="10">
+				<Delete basePath="${LOG_DIR}" maxDepth="1">
+					<IfFileName glob="${APP_NAME}-*.log.gz"/>
+					<IfLastModified age="30d"/>
+				</Delete>
+			</DefaultRolloverStrategy>
+		</RollingFile>
+	</Appenders>
+
+	<Loggers>
+		<!-- Código de la aplicación -->
+		<Logger name="com.aydsii" level="debug" additivity="false">
+			<AppenderRef ref="Console"/>
+			<AppenderRef ref="File"/>
+		</Logger>
+
+		<!-- SQL ejecutado por Hibernate (subir a debug para verlo) -->
+		<Logger name="org.hibernate.SQL" level="info"/>
+
+		<Root level="info">
+			<AppenderRef ref="Console"/>
+			<AppenderRef ref="File"/>
+		</Root>
+	</Loggers>
+
+</Configuration>
