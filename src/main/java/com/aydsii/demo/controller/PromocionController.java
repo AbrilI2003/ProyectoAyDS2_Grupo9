@@ -66,7 +66,7 @@ public class PromocionController {
     })
     public ResponseEntity<ApiResponse<List<PromocionDTO>>> listarVigentes() {
 
-        List<PromocionDTO> promocionesDTO = promocionService.listarVigentes();       // mensaje 2: listarVigentes()
+        List<PromocionDTO> promocionesDTO = promocionService.obtenerPromocionesVigentes();       // mensaje 2: listarVigentes()
 
         // A1 - Sin promociones vigentes: no es un error, se responde 200 con la lista vacía y el mensaje del CU
         String mensaje = promocionesDTO.isEmpty() ? MENSAJE_SIN_PROMOCIONES : MENSAJE_CON_PROMOCIONES;

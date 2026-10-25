@@ -1,8 +1,8 @@
 package com.aydsii.demo.controller;
 
 import com.aydsii.demo.dto.ApiResponse;
-import com.aydsii.demo.dto.PedidoDetalleDTO;
-import com.aydsii.demo.service.PedidoService;
+import com.aydsii.demo.dto.DetallePedidoDTO;
+import com.aydsii.demo.service.DetallePedidoService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -10,6 +10,7 @@ import io.swagger.v3.oas.annotations.media.ExampleObject;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.constraints.Positive;
+import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -62,10 +63,10 @@ public class PedidoController {
             }
             """;
 
-    private final PedidoService pedidoService;
+    private final DetallePedidoService pedidoService;
 
     // Inyección de dependencias por constructor: Spring crea el service y lo pasa acá
-    public PedidoController(PedidoService pedidoService) {
+    public PedidoController(DetallePedidoService pedidoService) {
         this.pedidoService = pedidoService;
     }
 
@@ -99,7 +100,7 @@ public class PedidoController {
                     content = @Content(mediaType = "application/json",
                             examples = @ExampleObject(name = "Error interno", value = EJEMPLO_ERROR_500)))
     })
-    public ResponseEntity<ApiResponse<PedidoDetalleDTO>> getDetallePedido(
+    public ResponseEntity<ApiResponse<DetallePedidoDTO>> getDetallePedido(
             @Parameter(description = "Id del pedido a consultar", example = "2")
             @PathVariable
             @Positive(message = "El id del pedido debe ser un número positivo")     // si llega 0 o negativo -> 400 (lo resuelve el GlobalExceptionHandler)
@@ -108,10 +109,10 @@ public class PedidoController {
         // mensaje 2: getDetallePedido(idPedido)
         // Si el pedido no existe, el service lanza ResourceNotFoundException y el GlobalExceptionHandler responde 404.
         // Por eso acá no hace falta ningún if ni try/catch.
-        PedidoDetalleDTO detalleDTO = pedidoService.getDetallePedido(idPedido);
+        List<DetallePedidoDTO> detallesDTO = pedidoService.calcularDetalleCompleto(idPedido);
 
-        ApiResponse<PedidoDetalleDTO> respuesta = ApiResponse.success(         // mensaje 5: success(200, mensaje, detalleDTO)
-                HttpStatus.OK.value(), MENSAJE_OK, detalleDTO);
+        ApiResponse<DetallePedidoDTO> respuesta = ApiResponse.success(         // mensaje 5: success(200, mensaje, detalleDTO)
+                HttpStatus.OK.value(), MENSAJE_OK, detallesDTO);
 
         return ResponseEntity.ok(respuesta);        // HTTP 200 + ApiResponse<detalleDTO>
     }
