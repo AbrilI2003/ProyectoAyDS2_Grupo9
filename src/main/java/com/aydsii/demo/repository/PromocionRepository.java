@@ -12,6 +12,7 @@ import java.util.List;
 @Repository
 public interface PromocionRepository extends JpaRepository<Promocion, Long> {
 
-    @Query("SELECT p FROM Promocion p WHERE :fechaActual BETWEEN p.fechaInicio AND p.fechaFin")
+    @Query("SELECT p FROM Promocion p JOIN FETCH p.producto " +
+    "WHERE :fechaActual BETWEEN p.fechaInicio AND p.fechaFin")
     List<Promocion> findPromocionesVigentes(@Param("fechaActual") LocalDate fechaActual);
 }
