@@ -10,16 +10,17 @@ import io.swagger.v3.oas.annotations.media.ExampleObject;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.constraints.Positive;
-import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
+
 // CU-02 Consultar detalle de pedido
 // El controller recibe el id del pedido por la URL, le pide el detalle al service y arma la respuesta.
-// Los cálculos (subtotales, envío, total) están en PedidoService.
+// Los cálculos (subtotal de cada producto) están en DetallePedidoService.
 //
 // Igual que en PromocionController: la anotación de Swagger se escribe con el nombre completo
 // porque se llama igual que nuestra clase ApiResponse.
@@ -50,7 +51,7 @@ public class PedidoController {
     private static final String EJEMPLO_ERROR_404 = """
             {
               "status": 404,
-              "messege": "No existe un pedido con id 999",
+              "messege": "No se encontró el detalle para el pedido ID: 999",
               "data": null
             }
             """;
@@ -63,11 +64,11 @@ public class PedidoController {
             }
             """;
 
-    private final DetallePedidoService pedidoService;
+    private final DetallePedidoService detallePedidoService;
 
     // Inyección de dependencias por constructor: Spring crea el service y lo pasa acá
-    public PedidoController(DetallePedidoService pedidoService) {
-        this.pedidoService = pedidoService;
+    public PedidoController(DetallePedidoService detallePedidoService) {
+        this.detallePedidoService = detallePedidoService;
     }
 
 
@@ -75,8 +76,8 @@ public class PedidoController {
     @GetMapping("/detalle_pedido/{idPedido}")
     @Operation(
             summary = "Consultar el detalle de un pedido",
-            description = "Devuelve la información completa del pedido: datos generales, productos con su "
-                    + "cantidad, precio unitario y subtotal, costo de envío y total.")
+            description = "Devuelve los productos del pedido indicado, cada uno con su cantidad, "
+                    + "precio unitario y subtotal (cantidad x precio unitario).")
     @ApiResponses({
             @io.swagger.v3.oas.annotations.responses.ApiResponse(
                     responseCode = "200",
@@ -100,18 +101,18 @@ public class PedidoController {
                     content = @Content(mediaType = "application/json",
                             examples = @ExampleObject(name = "Error interno", value = EJEMPLO_ERROR_500)))
     })
-    public ResponseEntity<ApiResponse<DetallePedidoDTO>> getDetallePedido(
+    public ResponseEntity<ApiResponse<List<DetallePedidoDTO>>> getDetallePedido(
             @Parameter(description = "Id del pedido a consultar", example = "2")
             @PathVariable
             @Positive(message = "El id del pedido debe ser un número positivo")     // si llega 0 o negativo -> 400 (lo resuelve el GlobalExceptionHandler)
             Long idPedido) {
 
-        // mensaje 2: getDetallePedido(idPedido)
-        // Si el pedido no existe, el service lanza ResourceNotFoundException y el GlobalExceptionHandler responde 404.
+        // mensaje 2: le pido al service el detalle completo del pedido (una lista, un elemento por cada producto)
+        // Si el pedido no existe, el service lanza una excepción y el GlobalExceptionHandler arma la respuesta de error.
         // Por eso acá no hace falta ningún if ni try/catch.
-        List<DetallePedidoDTO> detallesDTO = pedidoService.calcularDetalleCompleto(idPedido);
+        List<DetallePedidoDTO> detallesDTO = detallePedidoService.calcularDetalleCompleto(idPedido);
 
-        ApiResponse<DetallePedidoDTO> respuesta = ApiResponse.success(         // mensaje 5: success(200, mensaje, detalleDTO)
+        ApiResponse<List<DetallePedidoDTO>> respuesta = ApiResponse.success(       // mensaje 5: success(200, mensaje, detalleDTO)
                 HttpStatus.OK.value(), MENSAJE_OK, detallesDTO);
 
         return ResponseEntity.ok(respuesta);        // HTTP 200 + ApiResponse<detalleDTO>
