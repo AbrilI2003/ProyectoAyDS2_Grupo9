@@ -18,4 +18,3 @@ public class PromocionDTO {
 
     private String nombreProducto;
 }
-
