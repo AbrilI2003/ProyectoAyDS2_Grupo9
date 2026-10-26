@@ -12,7 +12,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 @Service
-public class DetallePedidoService {
+public class DetallePedidoService { 
 
     private final PedidoRepository pedidoRepository;
 
@@ -21,16 +21,18 @@ public class DetallePedidoService {
     }
 
     public List<DetallePedidoDTO> calcularDetalleCompleto(Long pedidoId) {
-        // 1. Obtener los renglones del pedido
+
+        // Recupera los items de un pedido segun el ID
         List<DetallePedido> detalles = pedidoRepository.findDetallesPorPedidoId(pedidoId);
 
+        // Valida si existe 
         if (detalles == null || detalles.isEmpty()) {
             throw new ResourceNotFoundException("No se encontró el detalle para el pedido ID: " + pedidoId);
         }
 
-        // 2. Mapear cada entidad al DTO de 4 campos que creó Persona 1
         return detalles.stream()
                 .map(detalle -> {
+                    // Se calcula el subtotal de cada producto
                     BigDecimal subtotalItem = detalle.getPrecioUnitario()
                             .multiply(BigDecimal.valueOf(detalle.getCantidad()))
                             .setScale(2, RoundingMode.HALF_UP);
