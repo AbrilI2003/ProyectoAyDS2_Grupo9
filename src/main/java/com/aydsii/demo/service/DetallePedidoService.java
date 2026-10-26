@@ -3,6 +3,7 @@ package com.aydsii.demo.service;
 import com.aydsii.demo.dto.DetallePedidoDTO;
 import com.aydsii.demo.entity.DetallePedido;
 import com.aydsii.demo.repository.PedidoRepository;
+import com.aydsii.demo.exception.ResourceNotFoundException;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -24,7 +25,7 @@ public class DetallePedidoService {
         List<DetallePedido> detalles = pedidoRepository.findDetallesPorPedidoId(pedidoId);
 
         if (detalles == null || detalles.isEmpty()) {
-            throw new RuntimeException("No se encontró el detalle para el pedido ID: " + pedidoId);
+            throw new ResourceNotFoundException("No se encontró el detalle para el pedido ID: " + pedidoId);
         }
 
         // 2. Mapear cada entidad al DTO de 4 campos que creó Persona 1
