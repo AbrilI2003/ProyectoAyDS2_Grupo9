@@ -23,7 +23,6 @@ public class PedidoController {
 
     private final DetallePedidoService detallePedidoService;
 
-    // Inyección de dependencias por constructor: Spring crea el service y lo pasa acá
     public PedidoController(DetallePedidoService detallePedidoService) {
         this.detallePedidoService = detallePedidoService;
     }
@@ -33,8 +32,7 @@ public class PedidoController {
     @GetMapping("/detalle_pedido/{idPedido}")
     @Operation(
             summary = "Consultar el detalle de un pedido",
-            description = "Devuelve los productos del pedido indicado, cada uno con su cantidad, "
-                    + "precio unitario y subtotal (cantidad x precio unitario).")
+            description = "Devuelve los productos del pedido indicado, cada uno con su cantidad, precio unitario y subtotal (cantidad x precio unitario).")
     @ApiResponses({
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Detalle del pedido encontrado"),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "El id enviado no es válido (no es un número o no es positivo)"),
