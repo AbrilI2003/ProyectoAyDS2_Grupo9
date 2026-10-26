@@ -14,4 +14,3 @@ public class DetallePedidoDTO {
     private BigDecimal precioUnitario;
     private BigDecimal total; 
 }
-

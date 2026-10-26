@@ -6,6 +6,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.context.MessageSourceResolvable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.method.ParameterValidationResult;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -13,11 +14,9 @@ import org.springframework.web.method.annotation.HandlerMethodValidationExceptio
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
+import java.util.ArrayList;
 import java.util.List;
 
-// Manejo de errores CENTRALIZADO: cualquier excepción que se lance en un controller o en un service
-// termina acá, y se responde siempre con el formato estándar {status, messege, data}.
-// Así ningún controller necesita try/catch (es uno de los criterios de corrección del TP).
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
@@ -25,7 +24,6 @@ public class GlobalExceptionHandler {
 
 
     // 404 - el recurso pedido no existe (ej: GET /detalle_pedido/999)
-    // La lanza el service con un mensaje propio, por eso se usa ex.getMessage()
     @ExceptionHandler(ResourceNotFoundException.class)
     public ResponseEntity<ApiResponse<Void>> manejarNoEncontrado(ResourceNotFoundException ex) {
         return construirRespuesta(HttpStatus.NOT_FOUND, ex.getMessage());
@@ -38,14 +36,17 @@ public class GlobalExceptionHandler {
         return construirRespuesta(HttpStatus.BAD_REQUEST, mensaje);
     }
 
-    // 400 - falla una validación puesta sobre un parámetro (ej: @Positive en el idPedido -> GET /detalle_pedido/-5)
-    // Puede haber más de un error, así que se devuelven todos en una lista dentro de "data"
+    // 400 - falla una validación de un parámetro (ej: en el idPedido -> GET /detalle_pedido/-5)
+    // Como puede haber más de un error se devuelven todos en una lista dentro de "data"
     @ExceptionHandler(HandlerMethodValidationException.class)
     public ResponseEntity<ApiResponse<List<String>>> manejarParametroInvalido(HandlerMethodValidationException ex) {
-        List<String> errores = ex.getParameterValidationResults().stream()
-                .flatMap(resultado -> resultado.getResolvableErrors().stream())     // cada parámetro puede tener varios errores
-                .map(MessageSourceResolvable::getDefaultMessage)                    // me quedo con el mensaje de cada uno
-                .toList();
+        List<String> errores = new ArrayList<>();
+
+        for (ParameterValidationResult resultado : ex.getParameterValidationResults()) {     // recorro cada parámetro que falló
+            for (MessageSourceResolvable error : resultado.getResolvableErrors()) {         // cada parámetro puede tener varios errores
+                errores.add(error.getDefaultMessage());                                      // me quedo con el mensaje de cada uno
+            }
+        }
 
         ApiResponse<List<String>> respuesta = ApiResponse.error(
                 HttpStatus.BAD_REQUEST.value(), "Error de validación en los datos enviados", errores);
@@ -59,7 +60,6 @@ public class GlobalExceptionHandler {
     }
 
     // 404 - la ruta no existe en la API (ej: GET /promocionesss)
-    // Sin esto Spring devolvería su propio formato de error en vez del nuestro
     @ExceptionHandler(NoResourceFoundException.class)
     public ResponseEntity<ApiResponse<Void>> manejarRutaInexistente(NoResourceFoundException ex) {
         return construirRespuesta(HttpStatus.NOT_FOUND, "La ruta solicitada no existe");
@@ -73,7 +73,6 @@ public class GlobalExceptionHandler {
     }
 
     // 500 - cualquier otro error que no se haya previsto (ej: se cae la conexión con la base de datos)
-    // Es el último recurso: el enunciado pide usar 500 SOLO para errores no controlados
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> manejarErrorGenerico(Exception ex) {
         log.error("Error no controlado", ex);      // el detalle técnico queda en el log, al cliente no se le muestra
