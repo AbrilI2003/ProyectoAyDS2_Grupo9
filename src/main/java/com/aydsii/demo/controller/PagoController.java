@@ -1,0 +1,449 @@
+package com.aydsii.demo.controller;
+
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import com.aydsii.demo.dto.PagoResponse;
+import com.aydsii.demo.entity.DetallePedido;
+import com.aydsii.demo.entity.Pedido;
+import com.aydsii.demo.exception.ResourceNotFoundException;
+import com.aydsii.demo.repository.PedidoRepository;
+import com.aydsii.demo.service.PagoService;
+
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
+
+@RestController
+@RequestMapping("/pedidos")
+@Tag(name = "Pagos", description = "CU-04 Simular pago de pedido")
+public class PagoController {
+
+    private final PagoService pagoService;
+    private final PedidoRepository pedidoRepository;
+
+    public PagoController(PagoService pagoService,
+            PedidoRepository pedidoRepository) {
+        this.pagoService = pagoService;
+        this.pedidoRepository = pedidoRepository;
+    }
+
+    @PostMapping("/{idPedido}/simular-pago-exitoso")
+    @Operation(summary = "Simular pago exitoso",
+            description = "Simula que el pago fue aprobado y actualiza el estado del pedido.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Pago simulado exitoso"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "El pedido no está pendiente de pago"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Pedido no encontrado")
+    })
+    public ResponseEntity<PagoResponse> simularPagoExitoso(
+            @Parameter(description = "ID del pedido a pagar", example = "10", required = true)
+            @PathVariable Long idPedido) {
+
+        if (idPedido == null || idPedido <= 0) {
+            throw new IllegalArgumentException("El id del pedido debe ser un número positivo");
+        }
+
+        pagoService.simularPagoExitoso(idPedido);
+
+        Pedido pedido = pedidoRepository.findById(idPedido)
+                .orElseThrow(() -> new ResourceNotFoundException("Pedido no encontrado: " + idPedido));
+
+        PagoResponse respuesta = new PagoResponse();
+        respuesta.setPedidoId(pedido.getId());
+        respuesta.setEstadoPedido(pedido.getEstado());
+        respuesta.setEstadoPago("APROBADO");
+        respuesta.setMensaje("Pago exitoso para el pedido " + idPedido);
+
+        return ResponseEntity.ok(respuesta);
+    }
+
+    @GetMapping(value = "/{idPedido}/pago", produces = MediaType.TEXT_HTML_VALUE)
+    @Operation(hidden = true)
+    public ResponseEntity<String> paginaPago(
+            @Parameter(description = "ID del pedido", example = "10")
+            @PathVariable Long idPedido) {
+
+        Pedido pedido = pedidoRepository.findById(idPedido)
+                .orElseThrow(() -> new ResourceNotFoundException("Pedido no encontrado: " + idPedido));
+
+        // Verificar expiración del link (60 segundos) desde la BD
+        if ("PENDIENTE_PAGO".equalsIgnoreCase(pedido.getEstado())
+                && pedido.getFechaExpiracionPago() != null
+                && LocalDateTime.now().isAfter(pedido.getFechaExpiracionPago())) {
+            pagoService.devolverStock(pedido);
+            pedido.setEstado("CANCELADO");
+            pedido.setLinkPago(null);
+            pedidoRepository.save(pedido);
+
+            String htmlExpirado = "<!DOCTYPE html>\n"
+                    + "<html lang=\"es\">\n"
+                    + "<head>\n"
+                    + "<meta charset=\"UTF-8\">\n"
+                    + "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n"
+                    + "<title>Link expirado - Pedido " + idPedido + "</title>\n"
+                    + "<style>\n"
+                    + "body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: #f5f5f5; color: #333; display: flex; flex-direction: column; align-items: center; padding: 40px; }\n"
+                    + ".card { background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.1); max-width: 420px; width: 100%; text-align: center; }\n"
+                    + "h1 { color: #d32f2f; margin-bottom: 16px; }\n"
+                    + ".detalle { margin: 12px 0; font-size: 16px; color: #333; }\n"
+                    + "</style>\n"
+                    + "</head>\n"
+                    + "<body>\n"
+                    + "<div class=\"card\">\n"
+                    + "<h1>⏰ Link de pago expirado</h1>\n"
+                    + "<div class=\"detalle\">Pedido N°: <strong>" + idPedido + "</strong></div>\n"
+                    + "<div class=\"detalle\">Estado: <strong>CANCELADO</strong></div>\n"
+                    + "<p>El tiempo límite de 60 segundos para pagar expiró. El link <strong>no se puede regenerar</strong>.</p>\n"
+                    + "<p>Para realizar la compra nuevamente, generá un <strong>pedido nuevo</strong>.</p>\n"
+                    + "</div>\n"
+                    + "</body>\n"
+                    + "</html>";
+            return ResponseEntity.ok().contentType(MediaType.TEXT_HTML).body(htmlExpirado);
+        }
+
+        // Mostrar pantalla de cancelación si el pedido fue cancelado por otro motivo
+        if ("CANCELADO".equalsIgnoreCase(pedido.getEstado())) {
+            String htmlCancelado = "<!DOCTYPE html>\n"
+                    + "<html lang=\"es\">\n"
+                    + "<head>\n"
+                    + "<meta charset=\"UTF-8\">\n"
+                    + "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n"
+                    + "<title>Pedido cancelado - Pedido " + idPedido + "</title>\n"
+                    + "<style>\n"
+                    + "body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: #f5f5f5; color: #333; display: flex; flex-direction: column; align-items: center; padding: 40px; }\n"
+                    + ".card { background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.1); max-width: 420px; width: 100%; text-align: center; }\n"
+                    + "h1 { color: #d32f2f; margin-bottom: 16px; }\n"
+                    + ".detalle { margin: 12px 0; font-size: 16px; color: #333; }\n"
+                    + "</style>\n"
+                    + "</head>\n"
+                    + "<body>\n"
+                    + "<div class=\"card\">\n"
+                    + "<h1>Pedido cancelado</h1>\n"
+                    + "<div class=\"detalle\">Pedido N°: <strong>" + idPedido + "</strong></div>\n"
+                    + "<div class=\"detalle\">Estado: <strong>CANCELADO</strong></div>\n"
+                    + "<p>Este pedido fue cancelado. Para realizar la compra nuevamente, generá un <strong>pedido nuevo</strong>.</p>\n"
+                    + "</div>\n"
+                    + "</body>\n"
+                    + "</html>";
+            return ResponseEntity.ok().contentType(MediaType.TEXT_HTML).body(htmlCancelado);
+        }
+
+        BigDecimal montoProductos = BigDecimal.ZERO;
+        for (DetallePedido d : pedido.getDetalles()) {
+            montoProductos = montoProductos.add(
+                    d.getPrecioUnitario().multiply(BigDecimal.valueOf(d.getCantidad()))
+            );
+        }
+        BigDecimal montoEnvio = pedido.getCostoEnvio() != null ? pedido.getCostoEnvio() : BigDecimal.ZERO;
+        BigDecimal montoTotal = montoProductos.add(montoEnvio);
+
+        String html = "<!DOCTYPE html>\n"
+                + "<html lang=\"es\">\n"
+                + "<head>\n"
+                + "<meta charset=\"UTF-8\">\n"
+                + "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n"
+                + "<title>Mercado Pago - Pago de Pedido</title>\n"
+                + "<style>\n"
+                + "* { box-sizing: border-box; margin: 0; padding: 0; }\n"
+                + "body {\n"
+                + "  font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;\n"
+                + "  background: #f5f5f5;\n"
+                + "  color: #333;\n"
+                + "  line-height: 1.5;\n"
+                + "  padding: 20px;\n"
+                + "}\n"
+                + ".mp-container {\n"
+                + "  max-width: 420px;\n"
+                + "  margin: 40px auto;\n"
+                + "}\n"
+                + ".mp-header {\n"
+                + "  text-align: center;\n"
+                + "  margin-bottom: 30px;\n"
+                + "}\n"
+                + ".mp-logo {\n"
+                + "  color: #05539A;\n"
+                + "  font-size: 32px;\n"
+                + "  font-weight: bold;\n"
+                + "  letter-spacing: -1px;\n"
+                + "  display: inline-flex;\n"
+                + "  align-items: center;\n"
+                + "}\n"
+                + ".mp-logo span { color: #FFD22C; }\n"
+                + ".mp-card {\n"
+                + "  background: white;\n"
+                + "  border-radius: 12px;\n"
+                + "  box-shadow: 0 4px 16px rgba(0,0,0,0.12);\n"
+                + "  padding: 32px 24px;\n"
+                + "}\n"
+                + ".mp-resumen {\n"
+                + "  margin-bottom: 24px;\n"
+                + "}\n"
+                + ".mp-resumen h2 {\n"
+                + "  font-size: 18px;\n"
+                + "  color: #05539A;\n"
+                + "  margin-bottom: 16px;\n"
+                + "}\n"
+                + ".mp-detalle-row {\n"
+                + "  display: flex;\n"
+                + "  justify-content: space-between;\n"
+                + "  padding: 10px 0;\n"
+                + "  border-bottom: 1px solid #eee;\n"
+                + "  font-size: 14px;\n"
+                + "}\n"
+                + ".mp-detalle-row:last-child {\n"
+                + "  border-bottom: none;\n"
+                + "}\n"
+                + ".mp-total-row {\n"
+                + "  display: flex;\n"
+                + "  justify-content: space-between;\n"
+                + "  font-size: 16px;\n"
+                + "  font-weight: bold;\n"
+                + "  margin-top: 16px;\n"
+                + "  color: #05539A;\n"
+                + "}\n"
+                + ".mp-form-group {\n"
+                + "  margin-bottom: 16px;\n"
+                + "}\n"
+                + ".mp-form-group label {\n"
+                + "  display: block;\n"
+                + "  font-size: 12px;\n"
+                + "  color: #666;\n"
+                + "  margin-bottom: 6px;\n"
+                + "}\n"
+                + ".mp-form-control {\n"
+                + "  width: 100%;\n"
+                + "  padding: 12px;\n"
+                + "  border: 1px solid #ddd;\n"
+                + "  border-radius: 6px;\n"
+                + "  font-size: 14px;\n"
+                + "  background: #fff;\n"
+                + "}\n"
+                + ".mp-form-control:focus {\n"
+                + "  outline: none;\n"
+                + "  border-color: #05539A;\n"
+                + "}\n"
+                + ".mp-filas-doble {\n"
+                + "  display: flex;\n"
+                + "  gap: 12px;\n"
+                + "}\n"
+                + ".mp-filas-doble > div {\n"
+                + "  flex: 1;\n"
+                + "}\n"
+                + ".mp-btn-pagar {\n"
+                + "  width: 100%;\n"
+                + "  background: #FFD22C;\n"
+                + "  color: #05539A;\n"
+                + "  border: none;\n"
+                + "  padding: 16px;\n"
+                + "  border-radius: 6px;\n"
+                + "  font-size: 16px;\n"
+                + "  font-weight: bold;\n"
+                + "  cursor: pointer;\n"
+                + "}\n"
+                + ".mp-btn-pagar:hover:not(:disabled) {\n"
+                + "  background: #ecc41b;\n"
+                + "}\n"
+                + ".mp-btn-pagar:disabled {\n"
+                + "  background: #ccc;\n"
+                + "  color: #999;\n"
+                + "  cursor: not-allowed;\n"
+                + "}\n"
+                + "#resultado {\n"
+                + "  margin-top: 20px;\n"
+                + "  padding: 12px;\n"
+                + "  border-radius: 6px;\n"
+                + "  display: none;\n"
+                + "  font-size: 14px;\n"
+                + "}\n"
+                + ".mp-exito {\n"
+                + "  background: #d4edda;\n"
+                + "  color: #155724;\n"
+                + "  border: 1px solid #c3e6cb;\n"
+                + "}\n"
+                + ".mp-error {\n"
+                + "  background: #f8d7da;\n"
+                + "  color: #721c24;\n"
+                + "  border: 1px solid #f5c6cb;\n"
+                + "}\n"
+                + ".mp-pie {\n"
+                + "  text-align: center;\n"
+                + "  margin-top: 20px;\n"
+                + "  font-size: 11px;\n"
+                + "  color: #999;\n"
+                + "}\n"
+                + "</style>\n"
+                + "</head>\n"
+                + "<body>\n"
+                + "<div class=\"mp-container\">\n"
+                + "<div class=\"mp-header\">\n"
+                + "<div class=\"mp-logo\">Pasarela de Pagos</div>\n"
+                + "</div>\n"
+                + "<div class=\"mp-card\">\n"
+                + "<div class=\"mp-resumen\">\n"
+                + "<h2>Resumen del pedido</h2>\n"
+                + "<div class=\"mp-detalle-row\">\n"
+                + "<span>Pedido N°</span>\n"
+                + "<strong>" + idPedido + "</strong>\n"
+                + "</div>\n"
+                + "<div class=\"mp-detalle-row\">\n"
+                + "<span>Estado</span>\n"
+                + "<strong id=\"estadoPedido\">" + pedido.getEstado() + "</strong>\n"
+                + "</div>\n"
+                + "<div class=\"mp-detalle-row\">\n"
+                + "<span>Productos</span>\n"
+                + "<strong>$" + montoProductos + "</strong>\n"
+                + "</div>\n"
+                + "<div class=\"mp-detalle-row\">\n"
+                + "<span>Envío</span>\n"
+                + "<strong>$" + montoEnvio + "</strong>\n"
+                + "</div>\n"
+                + "<div class=\"mp-total-row\">\n"
+                + "<span>Total a pagar</span>\n"
+                + "<strong>$" + montoTotal + "</strong>\n"
+                + "</div>\n"
+                + "</div>\n"
+                + "<form id=\"formPago\" onsubmit=\"event.preventDefault(); pagar();\">\n"
+                + "<div class=\"mp-form-group\">\n"
+                + "<label>Número de tarjeta</label>\n"
+                + "<input type=\"text\" id=\"numTarjeta\" class=\"mp-form-control\" placeholder=\"1234 5678 9012 3456\" maxlength=\"19\" inputmode=\"numeric\" autocomplete=\"cc-number\" required>\n"
+                + "</div>\n"
+                + "<div class=\"mp-filas-doble\">\n"
+                + "<div class=\"mp-form-group\">\n"
+                + "<label>Vencimiento</label>\n"
+                + "<div style=\"display:flex; gap:8px;\">\n"
+                + "<select id=\"mesVencimiento\" class=\"mp-form-control\" required>\n"
+                + "<option value=\"\" disabled selected>Mes</option>\n"
+                + "</select>\n"
+                + "<select id=\"anioVencimiento\" class=\"mp-form-control\" required>\n"
+                + "<option value=\"\" disabled selected>Año</option>\n"
+                + "</select>\n"
+                + "</div>\n"
+                + "</div>\n"
+                + "<div class=\"mp-form-group\">\n"
+                + "<label>CVV</label>\n"
+                + "<input type=\"password\" id=\"cvv\" class=\"mp-form-control\" placeholder=\"•••\" maxlength=\"3\" inputmode=\"numeric\" autocomplete=\"cc-csc\" required>\n"
+                + "</div>\n"
+                + "</div>\n"
+                + "<div class=\"mp-form-group\">\n"
+                + "<label>Nombre del titular</label>\n"
+                + "<input type=\"text\" id=\"titular\" class=\"mp-form-control\" placeholder=\"Juan Pérez\" autocomplete=\"cc-name\" required>\n"
+                + "</div>\n"
+                + "<button type=\"submit\" id=\"btnPagar\" class=\"mp-btn-pagar\">PAGAR $" + montoTotal + "</button>\n"
+                + "</form>\n"
+                + "<div id=\"resultado\"></div>\n"
+                + "</div>\n"
+                + "<div class=\"mp-pie\">\n"
+                + "Mercado Pago - Simulación de pago local<br>\n"
+                + "Pedido " + idPedido + "\n"
+                + "</div>\n"
+                + "</div>\n"
+                + "<script>\n"
+                + "function formatearTarjeta(e) {\n"
+                + "  let v = e.target.value.replace(/\\D/g, '').substring(0,16);\n"
+                + "  v = v.replace(/(\\d{4})(?=\\d)/g, '$1 ');\n"
+                + "  e.target.value = v;\n"
+                + "}\n"
+                + "document.getElementById('numTarjeta').addEventListener('input', formatearTarjeta);\n"
+                + "\n"
+                + "// Cargar selects de mes y año\n"
+                + "(function cargarVencimiento() {\n"
+                + "  const selMes = document.getElementById('mesVencimiento');\n"
+                + "  const selAnio = document.getElementById('anioVencimiento');\n"
+                + "  const meses = ['01','02','03','04','05','06','07','08','09','10','11','12'];\n"
+                + "  meses.forEach(m => {\n"
+                + "    const opt = document.createElement('option');\n"
+                + "    opt.value = m;\n"
+                + "    opt.textContent = m;\n"
+                + "    selMes.appendChild(opt);\n"
+                + "  });\n"
+                + "  const anioActual = new Date().getFullYear();\n"
+                + "  for (let a = anioActual; a <= anioActual + 10; a++) {\n"
+                + "    const opt = document.createElement('option');\n"
+                + "    opt.value = String(a);\n"
+                + "    opt.textContent = String(a);\n"
+                + "    selAnio.appendChild(opt);\n"
+                + "  }\n"
+                + "})();\n"
+                + "\n"
+                + "// Si el pedido ya está pagado / en preparación, ocultamos el formulario al cargar\n"
+                + "function estadoYaPagado(estado) {\n"
+                + "  return /PREPARACION|PAGADO|EN_PREPARACION/i.test(estado);\n"
+                + "}\n"
+                + "(function chequearEstadoInicial() {\n"
+                + "  const estadoEl = document.getElementById('estadoPedido');\n"
+                + "  if (estadoEl && estadoYaPagado(estadoEl.textContent)) {\n"
+                + "    document.getElementById('formPago').style.display = 'none';\n"
+                + "    const res = document.getElementById('resultado');\n"
+                + "    res.style.display = 'block';\n"
+                + "    res.className = 'mp-exito';\n"
+                + "    res.innerHTML = '<strong>Este pedido ya está pago</strong><br>Estado actual: ' + estadoEl.textContent;\n"
+                + "  }\n"
+                + "})();\n"
+                + "\n"
+                + "async function pagar() {\n"
+                + "  const btn = document.getElementById('btnPagar');\n"
+                + "  const res = document.getElementById('resultado');\n"
+                + "  const numero = document.getElementById('numTarjeta').value.replace(/\\D/g, '');\n"
+                + "  const mes = document.getElementById('mesVencimiento').value;\n"
+                + "  const anio = document.getElementById('anioVencimiento').value;\n"
+                + "  const cvv = document.getElementById('cvv').value.replace(/\\D/g, '');\n"
+                + "  const titular = document.getElementById('titular').value.trim();\n"
+                + "\n"
+                + "  const errores = [];\n"
+                + "  if (numero.length !== 16) errores.push('El número de tarjeta debe tener 16 dígitos.');\n"
+                + "  if (!mes || !anio) errores.push('Seleccioná el mes y año de vencimiento.');\n"
+                + "  if (cvv.length !== 3) errores.push('El CVV debe tener 3 dígitos.');\n"
+                + "  if (!titular) errores.push('Ingresá el nombre del titular.');\n"
+                + "\n"
+                + "  if (errores.length > 0) {\n"
+                + "    res.style.display = 'block';\n"
+                + "    res.className = 'mp-error';\n"
+                + "    res.innerHTML = '<strong>Revisá los datos:</strong><br>' + errores.join('<br>');\n"
+                + "    return;\n"
+                + "  }\n"
+                + "\n"
+                + "  btn.disabled = true;\n"
+                + "  btn.textContent = 'Procesando...';\n"
+                + "  try {\n"
+                + "    const response = await fetch('/pedidos/" + idPedido + "/simular-pago-exitoso', {\n"
+                + "      method: 'POST',\n"
+                + "      headers: { 'Accept': 'application/json' }\n"
+                + "    });\n"
+                + "    const data = await response.json();\n"
+                + "    res.style.display = 'block';\n"
+                + "    if (response.ok) {\n"
+                + "      res.className = 'mp-exito';\n"
+                + "      res.innerHTML = '<strong>Pago aprobado</strong><br>' + data.mensaje;\n"
+                + "      document.getElementById('formPago').style.display = 'none';\n"
+                + "      const nuevoEstado = (data && data.estadoPedido) ? data.estadoPedido : 'EN PREPARACIÓN';\n"
+                + "      document.getElementById('estadoPedido').textContent = nuevoEstado;\n"
+                + "    } else {\n"
+                + "      res.className = 'mp-error';\n"
+                + "      res.innerHTML = '<strong>Error:</strong> ' + (data.message || 'No se pudo procesar el pago');\n"
+                + "    }\n"
+                + "  } catch (e) {\n"
+                + "    res.style.display = 'block';\n"
+                + "    res.className = 'mp-error';\n"
+                + "    res.innerHTML = '<strong>Error:</strong> ' + e.message;\n"
+                + "  } finally {\n"
+                + "    btn.disabled = false;\n"
+                + "    btn.textContent = 'PAGAR $" + montoTotal + "';\n"
+                + "  }\n"
+                + "}\n"
+                + "</script>\n"
+                + "</body>\n"
+                + "</html>";
+
+        return ResponseEntity.ok().contentType(MediaType.TEXT_HTML).body(html);
+    }
+}
