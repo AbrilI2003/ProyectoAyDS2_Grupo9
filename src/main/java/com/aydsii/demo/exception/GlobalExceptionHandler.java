@@ -1,17 +1,18 @@
 package com.aydsii.demo.exception;
 
 import com.aydsii.demo.dto.ApiResponse;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import com.aydsii.demo.logging.LoggerFacade;
 import org.springframework.context.MessageSourceResolvable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.method.ParameterValidationResult;
+import org.springframework.validation.FieldError;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.ArrayList;
@@ -20,7 +21,7 @@ import java.util.List;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
-    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);    // para dejar registro de los errores 500 en consola y en logs/
+    private final LoggerFacade log = LoggerFacade.getInstance();    // para dejar registro de los errores 500 en consola y en logs/
 
 
     // 404 - el recurso pedido no existe (ej: GET /detalle_pedido/999)
@@ -53,6 +54,18 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(respuesta);
     }
 
+    // 400 - validación del cuerpo de la request (@Valid en el controller)
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<ApiResponse<List<String>>> manejarValidacionBody(MethodArgumentNotValidException ex) {
+        List<String> errores = new ArrayList<>();
+        for (FieldError error : ex.getBindingResult().getFieldErrors()) {
+            errores.add(error.getField() + ": " + error.getDefaultMessage());
+        }
+        ApiResponse<List<String>> respuesta = ApiResponse.error(
+                HttpStatus.BAD_REQUEST.value(), "Error de validación en los datos enviados", errores);
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(respuesta);
+    }
+
     // 400 - validaciones manuales hechas en el service (por si alguna lanza IllegalArgumentException)
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ApiResponse<Void>> manejarArgumentoInvalido(IllegalArgumentException ex) {
@@ -70,6 +83,12 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<Void>> manejarMetodoNoPermitido(HttpRequestMethodNotSupportedException ex) {
         String mensaje = String.format("El método %s no está permitido para esta ruta", ex.getMethod());
         return construirRespuesta(HttpStatus.METHOD_NOT_ALLOWED, mensaje);
+    }
+
+    // 400 - errores de negocio lanzados desde los services (stock insuficiente, cantidad mínima, etc.)
+    @ExceptionHandler(BusinessException.class)
+    public ResponseEntity<ApiResponse<Void>> manejarErrorNegocio(BusinessException ex) {
+        return construirRespuesta(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 
     // 500 - cualquier otro error que no se haya previsto (ej: se cae la conexión con la base de datos)
