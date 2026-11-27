@@ -31,3 +31,6 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Logs que genera la app al correr ###
+logs/

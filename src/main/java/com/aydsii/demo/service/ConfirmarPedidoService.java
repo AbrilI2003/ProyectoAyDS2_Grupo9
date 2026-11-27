@@ -62,6 +62,14 @@ public class ConfirmarPedidoService {
         Cliente cliente = clienteRepository.findById(request.getClienteId())
                 .orElseThrow(() -> new ResourceNotFoundException("Cliente no encontrado: " + request.getClienteId()));
 
+        // Si el envío es dentro de Argentina, el código postal tiene que empezar con la letra
+        // de la provincia (formato CPA, ej: L6300ABC). Con esa letra se decide si está dentro de la zona de envío.
+        if ("Argentina".equalsIgnoreCase(request.getPais())
+                && !Character.isLetter(request.getCodigoPostal().charAt(0))) {
+            throw new IllegalArgumentException(
+                    "El código postal debe comenzar con la letra de la provincia (ej: L6300ABC para La Pampa)");
+        }
+
         // 2. VALIDACIÓN PREVIA DE STOCK (pase previo antes de tocar nada)
         validarStockSuficiente(request.getItems());
 
@@ -91,8 +99,8 @@ public class ConfirmarPedidoService {
             // Calcular precio unitario con promoción vigente (si aplica)
             BigDecimal precioConPromocion = calcularPrecioConPromocion(producto);
 
-            // Reservar stock
-            producto.setStock(producto.getStock() - cantidad);
+            // El stock NO se reserva acá: todavía no se sabe si es pedido o cotización.
+            // Se reserva más abajo, solo si es un pedido normal (durante la cotización no se reserva stock).
 
             DetallePedido detalle = new DetallePedido();
             detalle.setProducto(producto);
@@ -166,6 +174,9 @@ public class ConfirmarPedidoService {
 
             for (DetallePedido d : detalles) {
                 d.setPedido(pedido);
+                // Reservar stock: recién ahora, porque ya se sabe que es un pedido normal
+                Producto producto = d.getProducto();
+                producto.setStock(producto.getStock() - d.getCantidad());
             }
 
             pedidoRepository.save(pedido);
