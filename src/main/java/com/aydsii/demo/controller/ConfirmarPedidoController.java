@@ -1,5 +1,6 @@
 package com.aydsii.demo.controller;
 
+import com.aydsii.demo.dto.ApiResponse;
 import com.aydsii.demo.dto.PedidoConfirmarRequest;
 import com.aydsii.demo.dto.PedidoConfirmarResponse;
 import com.aydsii.demo.service.ConfirmarPedidoService;
@@ -32,7 +33,7 @@ public class ConfirmarPedidoController {
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Pedido confirmado correctamente"),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Error de validación (stock, cantidades mínimas, etc.)")
     })
-    public ResponseEntity<PedidoConfirmarResponse> confirmar(
+    public ResponseEntity<ApiResponse<PedidoConfirmarResponse>> confirmar(
             @io.swagger.v3.oas.annotations.parameters.RequestBody(
                     description = "Pedido con ítems y datos de entrega",
                     required = true
@@ -40,6 +41,8 @@ public class ConfirmarPedidoController {
             @Valid @RequestBody PedidoConfirmarRequest request) {
 
         PedidoConfirmarResponse respuesta = confirmarPedidoService.confirmar(request);
-        return ResponseEntity.status(HttpStatus.OK).body(respuesta);
+        ApiResponse<PedidoConfirmarResponse> respuestaApi = ApiResponse.success(       // success(200, mensaje, pedido o cotización)
+                HttpStatus.OK.value(), respuesta.getMensaje(), respuesta);
+        return ResponseEntity.ok(respuestaApi);        // HTTP 200 + ApiResponse<PedidoConfirmarResponse>
     }
 }

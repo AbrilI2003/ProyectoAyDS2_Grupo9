@@ -5,7 +5,9 @@ import org.slf4j.LoggerFactory;
 public class LoggerFacade {
 
     private static volatile LoggerFacade instancia;
-    private final org.slf4j.Logger logger = LoggerFactory.getLogger("VerdeGreenApp");
+    // El nombre empieza con "com.aydsii" para que tome la configuración de log4j2-spring.xml
+    // (nivel debug, consola y archivo logs/demo.log). Con otro nombre los debug no se mostraban.
+    private final org.slf4j.Logger logger = LoggerFactory.getLogger("com.aydsii.demo");
 
     private LoggerFacade() {} // privado = Singleton
 

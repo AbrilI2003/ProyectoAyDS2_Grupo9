@@ -102,6 +102,11 @@ public class PagoService {
                 .map(d -> d.getPrecioUnitario().multiply(BigDecimal.valueOf(d.getCantidad())))
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
+        // El importe del pago incluye el costo de envío (es el total que se cobra en la pasarela)
+        if (pedido.getCostoEnvio() != null) {
+            monto = monto.add(pedido.getCostoEnvio());
+        }
+
         aprobarPago(pedidoId, monto);
 
         Pedido actualizado = pedidoRepository.findById(pedidoId)
