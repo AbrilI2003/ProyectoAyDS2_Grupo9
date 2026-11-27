@@ -29,10 +29,7 @@ public class PagoService {
         this.pagoRepository = pagoRepository;
     }
 
-    /**
-     * Prepara los datos para la página de pago.
-     * Toda la lógica de negocio (expiración, cancelación, devolución de stock y montos) vive acá.
-     */
+    /* Prepara los datos para la página de pago.*/
     @Transactional
     public PagoVistaDTO obtenerVistaPago(Long idPedido) {
         if (idPedido == null || idPedido <= 0) {
@@ -71,9 +68,7 @@ public class PagoService {
         );
     }
 
-    /**
-     * Simula el pago exitoso de un pedido. Devuelve el resultado para que el controller solo lo muestre.
-     */
+    /* Simula el pago exitoso de un pedido. Devuelve el resultado para que el controller lo muestre.*/
     @Transactional
     public PagoResponse simularPagoExitoso(Long pedidoId) {
         if (pedidoId == null || pedidoId <= 0) {
@@ -141,12 +136,11 @@ public class PagoService {
     private void cancelarPorExpiracion(Pedido pedido) {
         devolverStock(pedido);
         pedido.setEstado("CANCELADO");
-        pedido.setLinkPago(null);
         pedidoRepository.save(pedido);
         log.warn("Link expirado. Pedido " + pedido.getId() + " cancelado. Stock devuelto.");
     }
 
-    /** Devuelve al stock las unidades reservadas por un pedido que se cancela. */
+    /* Devuelve al stock las unidades reservadas por un pedido que se cancela. */
     private void devolverStock(Pedido pedido) {
         if (pedido.getDetalles() == null) {
             return;
