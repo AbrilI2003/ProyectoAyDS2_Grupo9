@@ -1,5 +1,7 @@
 package com.aydsii.demo.service;
 
+import com.aydsii.demo.dto.PagoResponse;
+import com.aydsii.demo.dto.PagoVistaDTO;
 import com.aydsii.demo.entity.DetallePedido;
 import com.aydsii.demo.entity.Pago;
 import com.aydsii.demo.entity.Pedido;
@@ -28,11 +30,52 @@ public class PagoService {
     }
 
     /**
-     * Simula el pago exitoso de un pedido.
-     * Solo funciona si el pedido está en estado PENDIENTE_PAGO.
+     * Prepara los datos para la página de pago.
+     * Toda la lógica de negocio (expiración, cancelación, devolución de stock y montos) vive acá.
      */
     @Transactional
-    public void simularPagoExitoso(Long pedidoId) {
+    public PagoVistaDTO obtenerVistaPago(Long idPedido) {
+        if (idPedido == null || idPedido <= 0) {
+            throw new IllegalArgumentException("El id del pedido debe ser un número positivo");
+        }
+
+        Pedido pedido = pedidoRepository.findById(idPedido)
+                .orElseThrow(() -> new ResourceNotFoundException("Pedido no encontrado: " + idPedido));
+
+        boolean linkExpirado = "PENDIENTE_PAGO".equalsIgnoreCase(pedido.getEstado())
+                && pedido.getFechaExpiracionPago() != null
+                && LocalDateTime.now().isAfter(pedido.getFechaExpiracionPago());
+
+        if (linkExpirado) {
+            cancelarPorExpiracion(pedido);
+        }
+
+        BigDecimal montoProductos = BigDecimal.ZERO;
+        if (pedido.getDetalles() != null) {
+            for (DetallePedido d : pedido.getDetalles()) {
+                montoProductos = montoProductos.add(
+                        d.getPrecioUnitario().multiply(BigDecimal.valueOf(d.getCantidad()))
+                );
+            }
+        }
+        BigDecimal montoEnvio = pedido.getCostoEnvio() != null ? pedido.getCostoEnvio() : BigDecimal.ZERO;
+
+        log.info("Datos de pago preparados para pedido " + idPedido);
+        return new PagoVistaDTO(
+                pedido.getId(),
+                pedido.getEstado(),
+                montoProductos,
+                montoEnvio,
+                montoProductos.add(montoEnvio),
+                linkExpirado
+        );
+    }
+
+    /**
+     * Simula el pago exitoso de un pedido. Devuelve el resultado para que el controller solo lo muestre.
+     */
+    @Transactional
+    public PagoResponse simularPagoExitoso(Long pedidoId) {
         if (pedidoId == null || pedidoId <= 0) {
             throw new IllegalArgumentException("El id del pedido debe ser un número positivo");
         }
@@ -47,14 +90,9 @@ public class PagoService {
             );
         }
 
-        // Validar expiración del link (60 segundos) desde la BD
         if (pedido.getFechaExpiracionPago() != null
                 && LocalDateTime.now().isAfter(pedido.getFechaExpiracionPago())) {
-            devolverStock(pedido);
-            pedido.setEstado("CANCELADO");
-            pedido.setLinkPago(null);
-            pedidoRepository.save(pedido);
-            log.warn("Link expirado. Pedido " + pedidoId + " cancelado. Stock devuelto.");
+            cancelarPorExpiracion(pedido);
             throw new BusinessException(
                     "El link de pago del pedido " + pedidoId + " expiró. El pedido fue cancelado. Debe realizarse un nuevo pedido."
             );
@@ -66,7 +104,17 @@ public class PagoService {
 
         aprobarPago(pedidoId, monto);
 
+        Pedido actualizado = pedidoRepository.findById(pedidoId)
+                .orElseThrow(() -> new ResourceNotFoundException("Pedido no encontrado: " + pedidoId));
+
+        PagoResponse respuesta = new PagoResponse();
+        respuesta.setPedidoId(actualizado.getId());
+        respuesta.setEstadoPedido(actualizado.getEstado());
+        respuesta.setEstadoPago("APROBADO");
+        respuesta.setMensaje("Pago exitoso para el pedido " + pedidoId);
+
         log.info("Pago simulado exitoso para pedido " + pedidoId);
+        return respuesta;
     }
 
     private void aprobarPago(Long pedidoId, BigDecimal importe) {
@@ -85,8 +133,16 @@ public class PagoService {
         log.info("Pago aprobado. Pedido " + pedidoId + " pasó a EN_PREPARACION.");
     }
 
+    private void cancelarPorExpiracion(Pedido pedido) {
+        devolverStock(pedido);
+        pedido.setEstado("CANCELADO");
+        pedido.setLinkPago(null);
+        pedidoRepository.save(pedido);
+        log.warn("Link expirado. Pedido " + pedido.getId() + " cancelado. Stock devuelto.");
+    }
+
     /** Devuelve al stock las unidades reservadas por un pedido que se cancela. */
-    public void devolverStock(Pedido pedido) {
+    private void devolverStock(Pedido pedido) {
         if (pedido.getDetalles() == null) {
             return;
         }
