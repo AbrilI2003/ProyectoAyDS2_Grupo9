@@ -54,7 +54,7 @@ public class ConfirmarPedidoService {
         this.emailService = emailService;
     }
 
-    @Transactional
+        @Transactional
     public PedidoConfirmarResponse confirmar(PedidoConfirmarRequest request) {
         log.info("Creando y confirmando pedido para cliente ID: " + request.getClienteId());
 
@@ -73,11 +73,13 @@ public class ConfirmarPedidoService {
         // 2. VALIDACIÓN PREVIA DE STOCK (pase previo antes de tocar nada)
         validarStockSuficiente(request.getItems());
 
-        // 3. Procesar ítems, reservar stock y calcular montos con promociones
+        // 3. Determinar si es cotización
+        boolean pedidoEspecial = esCotizacion(request.getItems(), request.getPais(), request.getCodigoPostal());
+
+        // 4. Procesar ítems. Los precios y montos solo se calculan si es pedido normal.
         Integer totalUnidades = 0;
         BigDecimal montoProductos = BigDecimal.ZERO;
         List<DetallePedido> detalles = new ArrayList<>();
-        boolean excedeMaximoPorProducto = false;
 
         for (ItemPedidoRequest item : request.getItems()) {
             Producto producto = productoRepository.findById(item.getProductoId())
@@ -91,75 +93,56 @@ public class ConfirmarPedidoService {
                 );
             }
 
-            // Si supera el máximo por producto, NO es error: el pedido pasa a ser especial (cotización)
-            if (cantidad > config.getStockMaximoProducto()) {
-                excedeMaximoPorProducto = true;
-            }
-
-            // Calcular precio unitario con promoción vigente (si aplica)
-            BigDecimal precioConPromocion = calcularPrecioConPromocion(producto);
-
-            // El stock NO se reserva acá: todavía no se sabe si es pedido o cotización.
-            // Se reserva más abajo, solo si es un pedido normal (durante la cotización no se reserva stock).
-
             DetallePedido detalle = new DetallePedido();
             detalle.setProducto(producto);
             detalle.setCantidad(cantidad);
-            detalle.setPrecioUnitario(precioConPromocion);
+
+            if (!pedidoEspecial) {
+                // Calcular precio con promoción y acumular monto solo para pedidos normales
+                BigDecimal precioConPromocion = calcularPrecioConPromocion(producto);
+                detalle.setPrecioUnitario(precioConPromocion);
+                montoProductos = montoProductos.add(precioConPromocion.multiply(BigDecimal.valueOf(cantidad)));
+            }
 
             detalles.add(detalle);
-
             totalUnidades += cantidad;
-            montoProductos = montoProductos.add(precioConPromocion.multiply(BigDecimal.valueOf(cantidad)));
-        }
-
-        // 4. Determinar si es pedido especial (mayorista)
-        boolean esMayoristaPorUnidades = totalUnidades > config.getLimiteUnidadesMayorista();
-        boolean esDestinoEspecial = !"Argentina".equalsIgnoreCase(request.getPais())
-                || !esProvinciaPermitida(request.getCodigoPostal());
-
-        boolean pedidoEspecial = esMayoristaPorUnidades || esDestinoEspecial || excedeMaximoPorProducto;
-
-        // Monto total = productos + envío
-        BigDecimal montoEnvio = calcularCostoEnvio();
-        BigDecimal montoTotal = montoProductos.add(montoEnvio);
-
-        // Detalle de productos para la respuesta
-        List<DetallePedidoDTO> detallesDTO = new ArrayList<>();
-        for (DetallePedido d : detalles) {
-            BigDecimal subtotal = d.getPrecioUnitario().multiply(BigDecimal.valueOf(d.getCantidad()));
-            detallesDTO.add(new DetallePedidoDTO(
-                    d.getProducto().getNombre(),
-                    d.getCantidad(),
-                    d.getPrecioUnitario(),
-                    subtotal
-            ));
         }
 
         PedidoConfirmarResponse respuesta = new PedidoConfirmarResponse();
 
         if (pedidoEspecial) {
-            // Pedido especial (mayorista): crear Cotización en BD, SIN crear pedido aún
             Cotizacion cotizacion = new Cotizacion();
-            cotizacion.setPedido(null); // aún no hay pedido
-            cotizacion.setMontoCotizado(montoTotal);
+            cotizacion.setPedido(null);
+            cotizacion.setMontoCotizado(BigDecimal.ZERO);
             cotizacion.setFechaEmision(LocalDate.now());
             cotizacion.setFechaVencimiento(LocalDate.now().plusDays(config.getDiasVencimientoCotizacion()));
             cotizacion.setEstado("SOLICITADA");
-            cotizacion.setEnlaceWhatsapp(generarLinkWhatsApp(null, detallesDTO));
+            cotizacion.setEnlaceWhatsapp(generarLinkWhatsApp(null, detalles));
             cotizacion.setDiasParaResponder(config.getDiasVencimientoCotizacion());
 
             cotizacionRepository.save(cotizacion);
 
-            // Generar enlace de WhatsApp con el número de cotización y el detalle del pedido
-            String enlaceWhatsapp = generarLinkWhatsApp(cotizacion.getId(), detallesDTO);
+            String enlaceWhatsapp = generarLinkWhatsApp(cotizacion.getId(), detalles);
 
             respuesta.setId(cotizacion.getId());
             respuesta.setMensaje("Pedido que requiere cotización. Se generó una cotización en estado solicitada. Comuníquese con nuestros vendedores.");
             respuesta.setEnlaceWhatsapp(enlaceWhatsapp);
-            // No se setean linkPago ni montos ni detalles en la response para pedidos especiales
         } else {
-            // Pedido normal: crear el pedido
+            // Pedido normal (se calculan los montos y se reserva stock)
+            BigDecimal montoEnvio = calcularCostoEnvio();
+            BigDecimal montoTotal = montoProductos.add(montoEnvio);
+
+            List<DetallePedidoDTO> detallesDTO = new ArrayList<>();
+            for (DetallePedido d : detalles) {
+                BigDecimal subtotal = d.getPrecioUnitario().multiply(BigDecimal.valueOf(d.getCantidad()));
+                detallesDTO.add(new DetallePedidoDTO(
+                        d.getProducto().getNombre(),
+                        d.getCantidad(),
+                        d.getPrecioUnitario(),
+                        subtotal
+                ));
+            }
+
             Pedido pedido = new Pedido();
             pedido.setCliente(cliente);
             pedido.setEstado("PENDIENTE_PAGO");
@@ -174,22 +157,19 @@ public class ConfirmarPedidoService {
 
             for (DetallePedido d : detalles) {
                 d.setPedido(pedido);
-                // Reservar stock: recién ahora, porque ya se sabe que es un pedido normal
+                // Reservar stock
                 Producto producto = d.getProducto();
                 producto.setStock(producto.getStock() - d.getCantidad());
             }
 
             pedidoRepository.save(pedido);
 
-            // Link de pago que apunta a la página de pago de este proyecto
             String linkPago = generarLinkPagoSimulado(pedido.getId());
             pedido.setLinkPago(linkPago);
-            // Expiración en 60 segundos PERSISTIDA en BD (sobrevive reinicios)
             pedido.setFechaExpiracionPago(LocalDateTime.now().plusSeconds(60));
             pedidoRepository.save(pedido);
             log.debug("Link de pago con expiración en 60s guardado en BD para pedido " + pedido.getId());
 
-            // Enviar email de confirmación al cliente
             emailService.enviarConfirmacionPedido(cliente.getEmail(), pedido.getId(), linkPago);
 
             respuesta.setId(pedido.getId());
@@ -205,10 +185,25 @@ public class ConfirmarPedidoService {
         return respuesta;
     }
 
-    /**
-     * Valida que todos los ítems tengan stock suficiente ANTES de procesar cualquier cambio.
-     * Si falta stock de algún producto, lanza excepción y no se modifica nada en la BD.
-     */
+    /*Determina si el pedido debe ir a cotización usando cantidades y destino.*/
+    private boolean esCotizacion(List<ItemPedidoRequest> items, String pais, String codigoPostal) {
+        Integer totalUnidades = 0;
+        boolean excedeMaximoPorProducto = false;
+
+        for (ItemPedidoRequest item : items) {
+            totalUnidades += item.getCantidad();
+            if (item.getCantidad() > config.getStockMaximoProducto()) {
+                excedeMaximoPorProducto = true;
+            }
+        }
+
+        boolean esMayoristaPorUnidades = totalUnidades > config.getLimiteUnidadesMayorista();
+        boolean esDestinoEspecial = !"Argentina".equalsIgnoreCase(pais) || !esProvinciaPermitida(codigoPostal);
+
+        return esMayoristaPorUnidades || esDestinoEspecial || excedeMaximoPorProducto;
+    }
+
+    /* Valida que todos los ítems tengan stock suficiente antes de procesar cualquier cambio.*/
     private void validarStockSuficiente(List<ItemPedidoRequest> items) {
         List<String> productosSinStock = new ArrayList<>();
 
@@ -217,12 +212,6 @@ public class ConfirmarPedidoService {
                     .orElseThrow(() -> new ResourceNotFoundException("Producto no encontrado: " + item.getProductoId()));
 
             Integer cantidad = item.getCantidad();
-
-            if (cantidad < config.getStockMinimo()) {
-                throw new CantidadMinimaException(
-                        "El producto " + producto.getNombre() + " requiere un mínimo de " + config.getStockMinimo() + " unidades"
-                );
-            }
 
             if (cantidad > producto.getStock()) {
                 productosSinStock.add(producto.getNombre() + " (solicitado: " + cantidad + ", disponible: " + producto.getStock() + ")");
@@ -236,10 +225,7 @@ public class ConfirmarPedidoService {
         }
     }
 
-    /**
-     * Calcula el precio unitario aplicando la mejor promoción vigente del producto.
-     * Si no hay promoción vigente, devuelve el precio base.
-     */
+    /* Calcula el precio unitario aplicando la mejor promoción vigente del producto.*/
     private BigDecimal calcularPrecioConPromocion(Producto producto) {
         LocalDate hoy = LocalDate.now();
         BigDecimal precioBase = producto.getPrecio();
@@ -262,11 +248,7 @@ public class ConfirmarPedidoService {
         return mejorPrecio.setScale(2, RoundingMode.HALF_UP);
     }
 
-    /**
-     * Aplica un descuento según el tipo.
-     * "PORCENTAJE": valorDescuento es un porcentaje (ej: 10 = 10% descuento)
-     * "MONTO_FIJO": valorDescuento se resta directamente del precio
-     */
+    /*Calcula descuento según el tipo.*/
     private BigDecimal aplicarDescuento(BigDecimal precio, String tipoDescuento, BigDecimal valorDescuento) {
         if (tipoDescuento == null || valorDescuento == null) {
             return precio;
@@ -294,11 +276,8 @@ public class ConfirmarPedidoService {
         };
     }
 
-    /**
-     * Genera el link de WhatsApp para contactar sobre una cotización.
-     * El mensaje por defecto incluye el número de cotización y el detalle del pedido.
-     */
-    private String generarLinkWhatsApp(Long cotizacionId, List<DetallePedidoDTO> detallesDTO) {
+    /*Genera el link de Whatsapp con el número de cotización y el detalle del pedido */
+    private String generarLinkWhatsApp(Long cotizacionId, List<DetallePedido> detalles) {
         String numeroTelefono = "2302206670";
         StringBuilder mensaje = new StringBuilder();
 
@@ -308,16 +287,14 @@ public class ConfirmarPedidoService {
             mensaje.append("Hola! Quisiera información sobre una cotización.\n");
         }
 
-        if (detallesDTO != null && !detallesDTO.isEmpty()) {
+        if (detalles != null && !detalles.isEmpty()) {
             mensaje.append("Detalle del pedido:\n");
-            for (DetallePedidoDTO d : detallesDTO) {
+            for (DetallePedido d : detalles) {
                 mensaje.append("- ")
-                       .append(d.getNombreProducto())
+                       .append(d.getProducto().getNombre())
                        .append(" x")
                        .append(d.getCantidad())
-                       .append(" ($")
-                       .append(d.getTotal())
-                       .append(")\n");
+                       .append("\n");
             }
         }
 
@@ -325,18 +302,12 @@ public class ConfirmarPedidoService {
         return "https://wa.me/" + numeroTelefono + "?text=" + mensajeCodificado;
     }
 
-    /**
-     * Genera el link de pago que apunta a la página de pago de este proyecto.
-     * Al visitarlo se muestra una pantalla con el botón PAGAR y los datos del pedido.
-     */
+    /*Genera el link de pago que apunta a la página de pago de este proyecto.*/
     private String generarLinkPagoSimulado(Long pedidoId) {
         return "http://localhost:8080/pedidos/" + pedidoId + "/pago";
     }
 
-    /**
-     * El costo de envío lo determina el servidor (nunca el cliente).
-     * Por ahora es un valor fijo; en producción se calcularía según destino, peso, volumen, etc.
-     */
+    /*El costo de envío lo determina el servidor (nunca el cliente).*/
     private BigDecimal calcularCostoEnvio() {
         return new BigDecimal("1500.00");
     }
