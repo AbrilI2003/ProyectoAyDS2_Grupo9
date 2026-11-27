@@ -1,5 +1,6 @@
 package com.aydsii.demo.controller;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -8,6 +9,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.aydsii.demo.dto.ApiResponse;
 import com.aydsii.demo.dto.PagoResponse;
 import com.aydsii.demo.dto.PagoVistaDTO;
 import com.aydsii.demo.service.PagoService;
@@ -36,11 +38,14 @@ public class PagoController {
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "El pedido no está pendiente de pago"),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Pedido no encontrado")
     })
-    public ResponseEntity<PagoResponse> simularPagoExitoso(
+    public ResponseEntity<ApiResponse<PagoResponse>> simularPagoExitoso(
             @Parameter(description = "ID del pedido a pagar", example = "10", required = true)
             @PathVariable Long idPedido) {
 
-        return ResponseEntity.ok(pagoService.simularPagoExitoso(idPedido));
+        PagoResponse pago = pagoService.simularPagoExitoso(idPedido);
+        ApiResponse<PagoResponse> respuesta = ApiResponse.success(       // success(200, mensaje, pago)
+                HttpStatus.OK.value(), pago.getMensaje(), pago);
+        return ResponseEntity.ok(respuesta);        // HTTP 200 + ApiResponse<PagoResponse>
     }
 
     @GetMapping(value = "/{idPedido}/pago", produces = MediaType.TEXT_HTML_VALUE)
@@ -378,9 +383,9 @@ public class PagoController {
                 + "    res.style.display = 'block';\n"
                 + "    if (response.ok) {\n"
                 + "      res.className = 'mp-exito';\n"
-                + "      res.innerHTML = '<strong>Pago aprobado</strong><br>' + data.mensaje;\n"
+                + "      res.innerHTML = '<strong>Pago aprobado</strong><br>' + data.message;\n"
                 + "      document.getElementById('formPago').style.display = 'none';\n"
-                + "      const nuevoEstado = (data && data.estadoPedido) ? data.estadoPedido : 'EN PREPARACIÓN';\n"
+                + "      const nuevoEstado = (data.data && data.data.estadoPedido) ? data.data.estadoPedido : 'EN PREPARACIÓN';\n"
                 + "      document.getElementById('estadoPedido').textContent = nuevoEstado;\n"
                 + "    } else {\n"
                 + "      res.className = 'mp-error';\n"
