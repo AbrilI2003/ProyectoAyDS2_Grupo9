@@ -62,7 +62,15 @@ public class ConfirmarPedidoService {
         Cliente cliente = clienteRepository.findById(request.getClienteId())
                 .orElseThrow(() -> new ResourceNotFoundException("Cliente no encontrado: " + request.getClienteId()));
 
-        // 2. Validación previa de stock
+        // Si el envío es dentro de Argentina, el código postal tiene que empezar con la letra
+        // de la provincia (formato CPA, ej: L6300ABC). Con esa letra se decide si está dentro de la zona de envío.
+        if ("Argentina".equalsIgnoreCase(request.getPais())
+                && !Character.isLetter(request.getCodigoPostal().charAt(0))) {
+            throw new IllegalArgumentException(
+                    "El código postal debe comenzar con la letra de la provincia (ej: L6300ABC para La Pampa)");
+        }
+
+        // 2. VALIDACIÓN PREVIA DE STOCK (pase previo antes de tocar nada)
         validarStockSuficiente(request.getItems());
 
         // 3. Determinar si es cotización
