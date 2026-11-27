@@ -1,8 +1,5 @@
 package com.aydsii.demo.controller;
 
-import java.math.BigDecimal;
-import java.time.LocalDateTime;
-
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -12,10 +9,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.aydsii.demo.dto.PagoResponse;
-import com.aydsii.demo.entity.DetallePedido;
-import com.aydsii.demo.entity.Pedido;
-import com.aydsii.demo.exception.ResourceNotFoundException;
-import com.aydsii.demo.repository.PedidoRepository;
+import com.aydsii.demo.dto.PagoVistaDTO;
 import com.aydsii.demo.service.PagoService;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -29,12 +23,9 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 public class PagoController {
 
     private final PagoService pagoService;
-    private final PedidoRepository pedidoRepository;
 
-    public PagoController(PagoService pagoService,
-            PedidoRepository pedidoRepository) {
+    public PagoController(PagoService pagoService) {
         this.pagoService = pagoService;
-        this.pedidoRepository = pedidoRepository;
     }
 
     @PostMapping("/{idPedido}/simular-pago-exitoso")
@@ -49,22 +40,7 @@ public class PagoController {
             @Parameter(description = "ID del pedido a pagar", example = "10", required = true)
             @PathVariable Long idPedido) {
 
-        if (idPedido == null || idPedido <= 0) {
-            throw new IllegalArgumentException("El id del pedido debe ser un número positivo");
-        }
-
-        pagoService.simularPagoExitoso(idPedido);
-
-        Pedido pedido = pedidoRepository.findById(idPedido)
-                .orElseThrow(() -> new ResourceNotFoundException("Pedido no encontrado: " + idPedido));
-
-        PagoResponse respuesta = new PagoResponse();
-        respuesta.setPedidoId(pedido.getId());
-        respuesta.setEstadoPedido(pedido.getEstado());
-        respuesta.setEstadoPago("APROBADO");
-        respuesta.setMensaje("Pago exitoso para el pedido " + idPedido);
-
-        return ResponseEntity.ok(respuesta);
+        return ResponseEntity.ok(pagoService.simularPagoExitoso(idPedido));
     }
 
     @GetMapping(value = "/{idPedido}/pago", produces = MediaType.TEXT_HTML_VALUE)
@@ -73,24 +49,15 @@ public class PagoController {
             @Parameter(description = "ID del pedido", example = "10")
             @PathVariable Long idPedido) {
 
-        Pedido pedido = pedidoRepository.findById(idPedido)
-                .orElseThrow(() -> new ResourceNotFoundException("Pedido no encontrado: " + idPedido));
+        PagoVistaDTO vista = pagoService.obtenerVistaPago(idPedido);
 
-        // Verificar expiración del link (60 segundos) desde la BD
-        if ("PENDIENTE_PAGO".equalsIgnoreCase(pedido.getEstado())
-                && pedido.getFechaExpiracionPago() != null
-                && LocalDateTime.now().isAfter(pedido.getFechaExpiracionPago())) {
-            pagoService.devolverStock(pedido);
-            pedido.setEstado("CANCELADO");
-            pedido.setLinkPago(null);
-            pedidoRepository.save(pedido);
-
+        if (vista.isLinkExpirado()) {
             String htmlExpirado = "<!DOCTYPE html>\n"
                     + "<html lang=\"es\">\n"
                     + "<head>\n"
                     + "<meta charset=\"UTF-8\">\n"
                     + "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n"
-                    + "<title>Link expirado - Pedido " + idPedido + "</title>\n"
+                    + "<title>Link expirado - Pedido " + vista.getPedidoId() + "</title>\n"
                     + "<style>\n"
                     + "body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: #f5f5f5; color: #333; display: flex; flex-direction: column; align-items: center; padding: 40px; }\n"
                     + ".card { background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.1); max-width: 420px; width: 100%; text-align: center; }\n"
@@ -101,7 +68,7 @@ public class PagoController {
                     + "<body>\n"
                     + "<div class=\"card\">\n"
                     + "<h1>⏰ Link de pago expirado</h1>\n"
-                    + "<div class=\"detalle\">Pedido N°: <strong>" + idPedido + "</strong></div>\n"
+                    + "<div class=\"detalle\">Pedido N°: <strong>" + vista.getPedidoId() + "</strong></div>\n"
                     + "<div class=\"detalle\">Estado: <strong>CANCELADO</strong></div>\n"
                     + "<p>El tiempo límite de 60 segundos para pagar expiró. El link <strong>no se puede regenerar</strong>.</p>\n"
                     + "<p>Para realizar la compra nuevamente, generá un <strong>pedido nuevo</strong>.</p>\n"
@@ -111,14 +78,13 @@ public class PagoController {
             return ResponseEntity.ok().contentType(MediaType.TEXT_HTML).body(htmlExpirado);
         }
 
-        // Mostrar pantalla de cancelación si el pedido fue cancelado por otro motivo
-        if ("CANCELADO".equalsIgnoreCase(pedido.getEstado())) {
+        if ("CANCELADO".equalsIgnoreCase(vista.getEstado())) {
             String htmlCancelado = "<!DOCTYPE html>\n"
                     + "<html lang=\"es\">\n"
                     + "<head>\n"
                     + "<meta charset=\"UTF-8\">\n"
                     + "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n"
-                    + "<title>Pedido cancelado - Pedido " + idPedido + "</title>\n"
+                    + "<title>Pedido cancelado - Pedido " + vista.getPedidoId() + "</title>\n"
                     + "<style>\n"
                     + "body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: #f5f5f5; color: #333; display: flex; flex-direction: column; align-items: center; padding: 40px; }\n"
                     + ".card { background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.1); max-width: 420px; width: 100%; text-align: center; }\n"
@@ -129,7 +95,7 @@ public class PagoController {
                     + "<body>\n"
                     + "<div class=\"card\">\n"
                     + "<h1>Pedido cancelado</h1>\n"
-                    + "<div class=\"detalle\">Pedido N°: <strong>" + idPedido + "</strong></div>\n"
+                    + "<div class=\"detalle\">Pedido N°: <strong>" + vista.getPedidoId() + "</strong></div>\n"
                     + "<div class=\"detalle\">Estado: <strong>CANCELADO</strong></div>\n"
                     + "<p>Este pedido fue cancelado. Para realizar la compra nuevamente, generá un <strong>pedido nuevo</strong>.</p>\n"
                     + "</div>\n"
@@ -137,15 +103,6 @@ public class PagoController {
                     + "</html>";
             return ResponseEntity.ok().contentType(MediaType.TEXT_HTML).body(htmlCancelado);
         }
-
-        BigDecimal montoProductos = BigDecimal.ZERO;
-        for (DetallePedido d : pedido.getDetalles()) {
-            montoProductos = montoProductos.add(
-                    d.getPrecioUnitario().multiply(BigDecimal.valueOf(d.getCantidad()))
-            );
-        }
-        BigDecimal montoEnvio = pedido.getCostoEnvio() != null ? pedido.getCostoEnvio() : BigDecimal.ZERO;
-        BigDecimal montoTotal = montoProductos.add(montoEnvio);
 
         String html = "<!DOCTYPE html>\n"
                 + "<html lang=\"es\">\n"
@@ -293,23 +250,23 @@ public class PagoController {
                 + "<h2>Resumen del pedido</h2>\n"
                 + "<div class=\"mp-detalle-row\">\n"
                 + "<span>Pedido N°</span>\n"
-                + "<strong>" + idPedido + "</strong>\n"
+                + "<strong>" + vista.getPedidoId() + "</strong>\n"
                 + "</div>\n"
                 + "<div class=\"mp-detalle-row\">\n"
                 + "<span>Estado</span>\n"
-                + "<strong id=\"estadoPedido\">" + pedido.getEstado() + "</strong>\n"
+                + "<strong id=\"estadoPedido\">" + vista.getEstado() + "</strong>\n"
                 + "</div>\n"
                 + "<div class=\"mp-detalle-row\">\n"
                 + "<span>Productos</span>\n"
-                + "<strong>$" + montoProductos + "</strong>\n"
+                + "<strong>$" + vista.getMontoProductos() + "</strong>\n"
                 + "</div>\n"
                 + "<div class=\"mp-detalle-row\">\n"
                 + "<span>Envío</span>\n"
-                + "<strong>$" + montoEnvio + "</strong>\n"
+                + "<strong>$" + vista.getMontoEnvio() + "</strong>\n"
                 + "</div>\n"
                 + "<div class=\"mp-total-row\">\n"
                 + "<span>Total a pagar</span>\n"
-                + "<strong>$" + montoTotal + "</strong>\n"
+                + "<strong>$" + vista.getMontoTotal() + "</strong>\n"
                 + "</div>\n"
                 + "</div>\n"
                 + "<form id=\"formPago\" onsubmit=\"event.preventDefault(); pagar();\">\n"
@@ -338,13 +295,13 @@ public class PagoController {
                 + "<label>Nombre del titular</label>\n"
                 + "<input type=\"text\" id=\"titular\" class=\"mp-form-control\" placeholder=\"Juan Pérez\" autocomplete=\"cc-name\" required>\n"
                 + "</div>\n"
-                + "<button type=\"submit\" id=\"btnPagar\" class=\"mp-btn-pagar\">PAGAR $" + montoTotal + "</button>\n"
+                + "<button type=\"submit\" id=\"btnPagar\" class=\"mp-btn-pagar\">PAGAR $" + vista.getMontoTotal() + "</button>\n"
                 + "</form>\n"
                 + "<div id=\"resultado\"></div>\n"
                 + "</div>\n"
                 + "<div class=\"mp-pie\">\n"
                 + "Mercado Pago - Simulación de pago local<br>\n"
-                + "Pedido " + idPedido + "\n"
+                + "Pedido " + vista.getPedidoId() + "\n"
                 + "</div>\n"
                 + "</div>\n"
                 + "<script>\n"
@@ -355,7 +312,6 @@ public class PagoController {
                 + "}\n"
                 + "document.getElementById('numTarjeta').addEventListener('input', formatearTarjeta);\n"
                 + "\n"
-                + "// Cargar selects de mes y año\n"
                 + "(function cargarVencimiento() {\n"
                 + "  const selMes = document.getElementById('mesVencimiento');\n"
                 + "  const selAnio = document.getElementById('anioVencimiento');\n"
@@ -375,7 +331,6 @@ public class PagoController {
                 + "  }\n"
                 + "})();\n"
                 + "\n"
-                + "// Si el pedido ya está pagado / en preparación, ocultamos el formulario al cargar\n"
                 + "function estadoYaPagado(estado) {\n"
                 + "  return /PREPARACION|PAGADO|EN_PREPARACION/i.test(estado);\n"
                 + "}\n"
@@ -415,7 +370,7 @@ public class PagoController {
                 + "  btn.disabled = true;\n"
                 + "  btn.textContent = 'Procesando...';\n"
                 + "  try {\n"
-                + "    const response = await fetch('/pedidos/" + idPedido + "/simular-pago-exitoso', {\n"
+                + "    const response = await fetch('/pedidos/" + vista.getPedidoId() + "/simular-pago-exitoso', {\n"
                 + "      method: 'POST',\n"
                 + "      headers: { 'Accept': 'application/json' }\n"
                 + "    });\n"
@@ -437,7 +392,7 @@ public class PagoController {
                 + "    res.innerHTML = '<strong>Error:</strong> ' + e.message;\n"
                 + "  } finally {\n"
                 + "    btn.disabled = false;\n"
-                + "    btn.textContent = 'PAGAR $" + montoTotal + "';\n"
+                + "    btn.textContent = 'PAGAR $" + vista.getMontoTotal() + "';\n"
                 + "  }\n"
                 + "}\n"
                 + "</script>\n"
